@@ -1,0 +1,191 @@
+function [covarEst,uEst] = pred_step(uPrev,covarPrev,angVel,acc,dt)
+%% BEFORE RUNNING THE CODE CHANGE NAME TO pred_step
+    %% Parameter Definition
+    % uPrev - is the mean of the prev state
+    %covarPrev - covar of the prev state
+    %angVel - angular velocity input at the time step
+    %acc - acceleration at the timestep
+    %dt - difference in time 
+
+    %% setup UKF constants
+    n = 27;    
+    alpha = 0.1;
+    K = -24;
+    beta = 2;
+    
+    
+    lambda = (alpha^2)*(n+K) - n;
+
+    wM0 = lambda / (n + lambda);
+    wC0 = (lambda / (n+lambda)) + (1-(alpha^2) + beta);
+    w = 1 / (2*(n+lambda));
+    
+
+
+    %% Create augmented mu and covar
+    Q = 1; 
+    Q = Q*eye(12);
+    Q =[zeros(15,12);Q];
+
+    uAug = [uPrev;zeros(12,1)];
+    covarAug = [covarPrev;zeros(12,15)];
+    covarAug = [covarAug,Q];
+
+    %% calculate sigma points
+    P = chol(covarAug);
+
+    X0 = uAug;
+    X = X0;
+
+    for i=1:n
+        Xi = uAug+sqrt(n+lambda)*P(:,i);
+        X = [X,Xi];
+    
+    end
+    
+    for i=n+1:2*n
+        Xi = uAug-sqrt(n+lambda)*P(:,i-n);
+        X = [X,Xi];
+    
+    end
+
+    %% run sigma points through the model
+Xt = zeros(15,2*n + 1);
+
+for j = 1:2*n+1
+    %extract values from sigma points
+    p = X(1:3,j);
+    q = X(4:6,j);
+    pDot = X(7:9,j);
+    bg = X(10:12,j);
+    ba = X(13:15,j);
+
+    
+    g = [0;0;-9.81];
+    
+    % generate R and G matrices from q
+    Rq = calcR(q);
+    Gq = calcG(q);
+    
+    %extract noise values
+    nbg = X(16:18,j);
+    nba = X(19:21,j);
+    ng = X(22:24,j);
+    na = X(25:27,j);
+    
+    %construct Process model
+    xDot = zeros(15,1);
+    
+    xDot(1:3) = pDot;
+    xDot(4:6) = Gq\(angVel-bg-ng); 
+    xDot(7:9) = g + (Rq*(acc-ba-na)); 
+    xDot(10:12) = nbg;
+    xDot(13:15) = nba;
+
+    
+    
+    Xt(:,j) = X(1:15,j) +dt*xDot;
+end
+
+%% extract estimated mu and covar via summations
+uEst = wM0*Xt(:,1);
+for k = 2:2*n+1
+    uEst = uEst + w*Xt(:,k);
+end
+
+
+
+covarEst = wC0*(Xt(:,1) - uEst)*(Xt(:,1)-uEst)';
+for o=2:2*n+1
+    covarEst =covarEst + (w*(Xt(:,o) - uEst)*(Xt(:,o)-uEst)');
+end
+
+
+
+end
+
+function Rot = calcR(eulerAng)
+phi = eulerAng(1);
+theta = eulerAng(2);
+psi = eulerAng(3);
+
+
+
+
+%Initialize rotations
+RZ = zeros(3,3);
+RY = zeros(3,3);
+RX = zeros(3,3);
+
+%%%%%%%%%    RX
+RX(1,1) = 1;
+RX(2,1) = 0;
+RX(3,1) = 0;
+
+RX(1,2) = 0;
+RX(2,2) = cos(phi);
+RX(3,2) = sin(phi);
+
+RX(1,3) = 0;
+RX(2,3) = -sin(phi);
+RX(3,3) = cos(phi);
+
+
+
+RY(1,1) = cos(theta);
+RY(2,1) = 0;
+RY(3,1) = -sin(theta);
+
+RY(1,2) = 0;
+RY(2,2) = 1;
+RY(3,2) = 0;
+
+RY(1,3) = sin(theta);
+RY(2,3) = 0;
+RY(3,3) = cos(theta);
+
+
+
+%%%%%%% RZ
+RZ(1,1) = cos(psi);
+RZ(2,1) = sin(psi);
+RZ(3,1) = 0;
+
+RZ(1,2) = -sin(psi);
+RZ(2,2) = cos(psi);
+RZ(3,2) = 0;
+
+RZ(1,3) = 0;
+RZ(2,3) = 0;
+RZ(3,3) = 1;
+
+
+Rot = RZ*RY*RX;
+
+
+end
+
+function Gq = calcG(eulerAng)
+theta = eulerAng(2);
+psi = eulerAng(3);
+
+Gq = zeros(3,3);
+
+
+Gq(1,1) = cos(psi)*cos(theta);
+Gq(2,1) = sin(psi)*cos(theta);
+Gq(3,1) = -sin(theta);
+
+
+Gq(1,2) = -sin(psi);
+Gq(2,2) = cos(psi);
+Gq(3,2) = 0;
+
+
+Gq(1,3) = 0;
+Gq(2,3) = 0;
+Gq(3,3) = 1;
+
+
+
+end
